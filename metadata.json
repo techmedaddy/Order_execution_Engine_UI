@@ -1,0 +1,5 @@
+{
+  "name": "Order Execution Engine Dashboard",
+  "description": "A technical, backend-focused dashboard for monitoring and managing an idempotent, concurrent order execution engine.",
+  "requestFramePermissions": []
+}

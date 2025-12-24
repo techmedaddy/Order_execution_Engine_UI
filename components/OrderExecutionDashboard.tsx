@@ -17,6 +17,7 @@ import {
   Monitor
 } from 'lucide-react';
 import { Order, OrderStatus, SystemMetrics } from '../types';
+import { createOrder, resetState, fetchOrders, fetchMetrics } from '../src/lib/api';
 
 // Mock Data Utilities
 const generateId = () => `ord_${Math.random().toString(36).substr(2, 9)}`;
@@ -93,30 +94,48 @@ const OrderExecutionDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.amount) return;
     
     setIsSubmitting(true);
     
-    // Simulate API delay
-    setTimeout(() => {
-      const newOrder: Order = {
-        id: generateId(),
+    try {
+      // Call backend API to create order
+      const newOrder = await createOrder({
         baseToken: form.baseToken,
         quoteToken: form.quoteToken,
         amount: parseFloat(form.amount),
-        status: 'QUEUED',
-        timestamp: generateTimestamp(),
-        idempotencyKey: `idem-${Math.floor(Math.random() * 10000)}`
-      };
+      });
       
       setOrders([newOrder, ...orders]);
       setForm(f => ({ ...f, amount: '' }));
-      setIsSubmitting(false);
       
-      setMetrics(m => ({ ...m, queueDepth: m.queueDepth + 1 }));
-    }, 600);
+      // Optionally refresh metrics after order creation
+      const updatedMetrics = await fetchMetrics();
+      setMetrics(updatedMetrics);
+    } catch (error) {
+      console.error('Failed to create order:', error);
+      alert('Failed to create order. Please check console for details.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleResetState = async () => {
+    try {
+      await resetState();
+      // Refresh orders and metrics after reset
+      const [freshOrders, freshMetrics] = await Promise.all([
+        fetchOrders(),
+        fetchMetrics()
+      ]);
+      setOrders(freshOrders);
+      setMetrics(freshMetrics);
+    } catch (error) {
+      console.error('Failed to reset state:', error);
+      alert('Failed to reset state. Please check console for details.');
+    }
   };
 
   const copyToClipboard = (text: string) => {
@@ -148,7 +167,10 @@ const OrderExecutionDashboard: React.FC = () => {
             <Monitor className="w-4 h-4" />
             Infrastructure Logs
           </button>
-          <button className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-100 transition-colors bg-zinc-900 border border-zinc-800 rounded-md">
+          <button 
+            onClick={handleResetState}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-100 transition-colors bg-zinc-900 border border-zinc-800 rounded-md"
+          >
             <RefreshCcw className="w-4 h-4" />
             Reset State
           </button>

@@ -85,16 +85,37 @@ yarn
 ```
 
 Environment variables
-- `VITE_API_BASE_URL` — base REST API URL (e.g., `http://localhost:3234/api`)
-- `VITE_WS_URL` — WebSocket URL (e.g., `ws://localhost:3234/ws`)
-- Additional dev keys can be configured in `vite.config.ts` for local testing.
+- `VITE_API_BASE_URL` — Backend API base URL
+  - **Local development**: `http://localhost:7542` (configured in `.env`)
+  - **Docker environment**: `http://backend:7542` (configured in `.env.docker`)
+  - This variable is **required** and the application will fail fast if not configured
 
-Run development server
+### Running Locally
 ```bash
 npm run dev
-# or
-yarn dev
 ```
+- Uses `.env` file automatically
+- Frontend runs on `http://localhost:3234`
+- Backend expected at `http://localhost:7542`
+
+### Running with Docker
+Ensure your `Dockerfile` or `docker-compose.yml` uses the `.env.docker` file:
+```yaml
+# docker-compose.yml example
+services:
+  frontend:
+    build: .
+    env_file:
+      - .env.docker
+    ports:
+      - "3234:3234"
+  backend:
+    # ... backend service configuration
+    ports:
+      - "7542:7542"
+```
+- Frontend calls `http://backend:7542` using Docker's service name
+- Backend must be named `backend` in docker-compose services
 
 Build for production
 ```bash

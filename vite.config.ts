@@ -1,34 +1,25 @@
 import path from 'path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
+/**
+ * Vite configuration for Order Execution Engine UI
+ * 
+ * Environment variables starting with VITE_ are automatically exposed to the client.
+ * - VITE_API_BASE_URL is defined in .env (local) or .env.docker (Docker)
+ * - Do NOT hardcode backend URLs here
+ */
+export default defineConfig({
+  server: {
+    port: 3234,
+    host: '0.0.0.0',
+  },
 
-  const API_BASE_URL =
-    env.VITE_API_BASE_URL || 'http://localhost:7542';
+  plugins: [react()],
 
-  return {
-    server: {
-      port: 3234,
-      host: '0.0.0.0',
-      cors: {
-        origin: API_BASE_URL,
-        credentials: true,
-      },
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, '.'),
     },
-
-    plugins: [react()],
-
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-      'process.env.API_BASE_URL': JSON.stringify(API_BASE_URL),
-    },
-
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      },
-    },
-  };
+  },
 });

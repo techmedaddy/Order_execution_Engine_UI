@@ -1,12 +1,15 @@
 
 import React from 'react';
 import OrderExecutionDashboard from './components/OrderExecutionDashboard';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const App: React.FC = () => {
   return (
-    <div className="min-h-screen bg-zinc-950">
-      <OrderExecutionDashboard />
-    </div>
+    <ErrorBoundary>
+      <div className="min-h-screen bg-zinc-950">
+        <OrderExecutionDashboard />
+      </div>
+    </ErrorBoundary>
   );
 };
 

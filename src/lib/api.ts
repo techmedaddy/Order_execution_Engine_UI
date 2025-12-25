@@ -1,93 +1,59 @@
-/**
- * API Client for Order Execution Engine
- * 
- * This module provides a centralized API client that reads the backend URL
- * from environment variables. This allows the frontend to work in both:
- * - Local development: VITE_API_BASE_URL=http://localhost:7542
- * - Docker environment: VITE_API_BASE_URL=http://backend:7542
- * 
- * The API base URL is configured via:
- * - .env file for local development (npm run dev)
- * - .env.docker file for Docker deployment (docker compose up)
- */
-
 import type { Order, SystemMetrics } from '../../types';
 
-// Read API base URL from Vite environment variables
-// This value is injected at build time by Vite
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-// Fail fast if configuration is missing
 if (!API_BASE_URL) {
-  throw new Error(
-    'VITE_API_BASE_URL is not defined. ' +
-    'Please ensure you have either .env (local) or .env.docker (Docker) configured.'
-  );
+  throw new Error('VITE_API_BASE_URL is not defined');
 }
 
-/**
- * Helper function to make API requests with content-type aware parsing
- */
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 async function apiRequest<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
-  
-  try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    });
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
 
-    if (!response.ok) {
-      // Try to extract error message from backend
-      let errorMessage = `API request failed: ${response.status} ${response.statusText}`;
-      try {
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          const errorData = await response.json();
-          if (errorData && errorData.error) {
-            errorMessage = errorData.error;
-          } else if (errorData && errorData.message) {
-            errorMessage = errorData.message;
-          }
-        }
-      } catch {
-        // If error parsing fails, use default message
-      }
-      throw new Error(errorMessage);
-    }
-
-    // Content-type aware parsing
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      return await response.json();
-    } else {
+  if (!response.ok) {
+    let message = `${response.status} ${response.statusText}`;
+    try {
       const text = await response.text();
-      return text as unknown as T;
-    }
-  } catch (error) {
-    console.error(`API request to ${url} failed:`, error);
-    throw error;
+      if (text && text.length < 200) message = text;
+    } catch {}
+    throw new Error(message);
   }
+
+  if (endpoint === '/api/metrics') {
+    return (await response.text()) as unknown as T;
+  }
+
+  return (await response.json()) as T;
 }
 
-/**
- * Create a new order with strict runtime validation
- * Handles backend response shapes: Order | { order: Order } | { data: Order }
- */
+/* ---------------- ORDERS ---------------- */
+
 export async function createOrder(orderData: {
   baseToken: string;
   quoteToken: string;
   amount: number;
 }): Promise<Order> {
-  // Generate unique idempotency key for this request
-  const idempotencyKey = crypto.randomUUID();
-  
+  const idempotencyKey = generateUUID();
+
   const response = await apiRequest<any>('/api/orders', {
     method: 'POST',
     body: JSON.stringify(orderData),
@@ -95,162 +61,101 @@ export async function createOrder(orderData: {
       'Idempotency-Key': idempotencyKey,
     },
   });
-  
-  // Handle all valid backend response shapes
-  let order: any;
-  if (response && typeof response === 'object') {
-    if (response.order) {
-      order = response.order;
-    } else if (response.data) {
-      order = response.data;
-    } else {
-      order = response;
-    }
-  } else {
-    throw new Error('Invalid response: expected object');
-  }
-  
-  // Strict validation: verify ALL required Order fields exist
+
+  const order = response?.order ?? response?.data ?? response;
+
   if (!order || typeof order !== 'object') {
-    throw new Error('Invalid response: order data is not an object');
+    throw new Error('Invalid order response');
   }
-  
-  if (typeof order.id !== 'string' || !order.id) {
-    throw new Error('Invalid response: missing or invalid id');
+
+  if (
+    typeof order.id !== 'string' ||
+    typeof order.baseToken !== 'string' ||
+    typeof order.quoteToken !== 'string' ||
+    typeof order.amount !== 'number' ||
+    typeof order.status !== 'string'
+  ) {
+    throw new Error('Order response missing required fields');
   }
-  
-  if (typeof order.baseToken !== 'string' || !order.baseToken) {
-    throw new Error('Invalid response: missing or invalid baseToken');
-  }
-  
-  if (typeof order.quoteToken !== 'string' || !order.quoteToken) {
-    throw new Error('Invalid response: missing or invalid quoteToken');
-  }
-  
-  if (typeof order.amount !== 'number') {
-    throw new Error('Invalid response: missing or invalid amount');
-  }
-  
-  if (typeof order.status !== 'string' || !order.status) {
-    throw new Error('Invalid response: missing or invalid status');
-  }
-  
-  if (typeof order.timestamp !== 'string' || !order.timestamp) {
-    throw new Error('Invalid response: missing or invalid timestamp');
-  }
-  
-  if (typeof order.idempotencyKey !== 'string' || !order.idempotencyKey) {
-    throw new Error('Invalid response: missing or invalid idempotencyKey');
-  }
-  
-  return order as Order;
+
+  return {
+    id: order.id,
+    baseToken: order.baseToken,
+    quoteToken: order.quoteToken,
+    amount: order.amount,
+    status: order.status,
+    timestamp: order.timestamp ?? order.createdAt ?? new Date().toISOString(),
+    idempotencyKey: order.idempotencyKey,
+  };
 }
 
-/**
- * Fetch all orders with runtime validation - always returns array
- */
 export async function fetchOrders(): Promise<Order[]> {
   try {
     const response = await apiRequest<any>('/api/orders');
-    
-    // Direct array
-    if (Array.isArray(response)) {
-      return response;
-    }
-    
-    // Wrapped in 'orders' key
-    if (response && Array.isArray(response.orders)) {
-      return response.orders;
-    }
-    
-    // Wrapped in 'data' key
-    if (response && Array.isArray(response.data)) {
-      return response.data;
-    }
-    
-    // Fallback to empty array
+
+    if (Array.isArray(response)) return response;
+    if (Array.isArray(response?.orders)) return response.orders;
+    if (Array.isArray(response?.data)) return response.data;
+
     return [];
-  } catch (error) {
-    console.error('Failed to fetch orders:', error);
+  } catch {
     return [];
   }
 }
 
-/**
- * Fetch system metrics with full validation
- */
+/* ---------------- METRICS ---------------- */
+
 export async function fetchMetrics(): Promise<SystemMetrics> {
   try {
     const response = await apiRequest<any>('/api/metrics');
-    
-    // If response is string (Prometheus format), return defaults
+
     if (typeof response === 'string') {
-      console.log('Metrics endpoint returned Prometheus format');
       return {
         workersActive: 0,
         maxWorkers: 0,
         queueDepth: 0,
         throughput: 0,
-        healthStatus: 'healthy'
+        healthStatus: 'healthy',
       };
     }
-    
-    // If response is object, validate and fill missing fields
-    if (response && typeof response === 'object') {
-      return {
-        workersActive: typeof response.workersActive === 'number' ? response.workersActive : 0,
-        maxWorkers: typeof response.maxWorkers === 'number' ? response.maxWorkers : 0,
-        queueDepth: typeof response.queueDepth === 'number' ? response.queueDepth : 0,
-        throughput: typeof response.throughput === 'number' ? response.throughput : 0,
-        healthStatus: ['healthy', 'degraded', 'down'].includes(response.healthStatus) 
-          ? response.healthStatus 
-          : 'healthy'
-      };
-    }
-    
-    // Fallback defaults
+
     return {
-      workersActive: 0,
-      maxWorkers: 0,
-      queueDepth: 0,
-      throughput: 0,
-      healthStatus: 'healthy'
+      workersActive: typeof response.workersActive === 'number' ? response.workersActive : 0,
+      maxWorkers: typeof response.maxWorkers === 'number' ? response.maxWorkers : 0,
+      queueDepth: typeof response.queueDepth === 'number' ? response.queueDepth : 0,
+      throughput: typeof response.throughput === 'number' ? response.throughput : 0,
+      healthStatus: ['healthy', 'degraded', 'down'].includes(response.healthStatus)
+        ? response.healthStatus
+        : 'healthy',
     };
-  } catch (error) {
-    console.error('Failed to fetch metrics:', error);
+  } catch {
     return {
       workersActive: 0,
       maxWorkers: 0,
       queueDepth: 0,
       throughput: 0,
-      healthStatus: 'degraded'
+      healthStatus: 'degraded',
     };
   }
 }
 
-/**
- * Reset system state with validation
- */
+/* ---------------- RESET ---------------- */
+
 export async function resetState(): Promise<{ success: boolean; message: string }> {
   try {
-    const response = await apiRequest<any>('/api/reset', {
-      method: 'POST',
-    });
-    
+    const response = await apiRequest<any>('/api/reset', { method: 'POST' });
     return {
       success: response?.success === true || response?.status === 'ok',
-      message: response?.message || response?.status || 'Reset completed'
+      message: response?.message ?? 'Reset completed',
     };
-  } catch (error) {
-    console.error('Failed to reset state:', error);
-    return { success: false, message: 'Reset failed' };
+  } catch {
+    return {
+      success: false,
+      message: 'Reset failed',
+    };
   }
 }
 
-/**
- * Export the base URL for debugging purposes
- */
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
-

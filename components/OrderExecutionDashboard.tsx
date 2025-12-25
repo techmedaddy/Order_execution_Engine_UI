@@ -439,13 +439,22 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, onCopy }) => {
             <span className="text-xs font-semibold text-zinc-500">{order.baseToken} / {order.quoteToken}</span>
           </div>
         </div>
+
+
       </div>
 
       <div className="flex items-center gap-6 justify-between md:justify-end">
-        <div className="text-right hidden sm:block">
-           <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">Idempotency Key</div>
-           <div className="text-[11px] font-mono text-zinc-400">{order.idempotencyKey}</div>
-        </div>
+        {order.idempotencyKey && (
+  <div className="text-right hidden sm:block">
+    <div className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider mb-0.5">
+      Idempotency Key
+    </div>
+    <div className="text-[11px] font-mono text-zinc-400">
+      {order.idempotencyKey}
+    </div>
+  </div>
+)}
+
 
         <div className="flex flex-col items-end gap-2">
           <div className={`px-3 py-1 rounded-full text-[10px] font-bold tracking-widest border uppercase flex items-center gap-1.5 ${config.bg} ${config.color}`}>

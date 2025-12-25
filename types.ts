@@ -8,7 +8,7 @@ export interface Order {
   amount: number;
   status: OrderStatus;
   timestamp: string;
-  idempotencyKey: string;
+  idempotencyKey?: string;
 }
 
 export interface SystemMetrics {

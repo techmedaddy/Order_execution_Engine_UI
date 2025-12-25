@@ -26,7 +26,7 @@ if (!API_BASE_URL) {
 }
 
 /**
- * Helper function to make API requests
+ * Helper function to make API requests with content-type aware parsing
  */
 async function apiRequest<T>(
   endpoint: string,
@@ -47,14 +47,14 @@ async function apiRequest<T>(
       throw new Error(`API request failed: ${response.status} ${response.statusText}`);
     }
 
-    // Special handling for /api/metrics - returns plain text (Prometheus format)
-    if (endpoint === '/api/metrics') {
+    // Content-type aware parsing
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return await response.json();
+    } else {
       const text = await response.text();
-      // Return text as-is, cast to T for type compatibility
       return text as unknown as T;
     }
-
-    return await response.json();
   } catch (error) {
     console.error(`API request to ${url} failed:`, error);
     throw error;
@@ -62,40 +62,99 @@ async function apiRequest<T>(
 }
 
 /**
- * Create a new order
+ * Create a new order with runtime validation
  */
 export async function createOrder(orderData: {
   baseToken: string;
   quoteToken: string;
   amount: number;
-}): Promise<Order> {
-  return apiRequest<Order>('/api/orders', {
-    method: 'POST',
-    body: JSON.stringify(orderData),
-  });
+}): Promise<Order | null> {
+  try {
+    const response = await apiRequest<any>('/api/orders', {
+      method: 'POST',
+      body: JSON.stringify(orderData),
+    });
+    
+    // Handle wrapped responses
+    const order = response?.order || response;
+    
+    // Validate order shape
+    if (order && typeof order === 'object' && 
+        typeof order.id === 'string' && 
+        typeof order.status === 'string') {
+      return order as Order;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Failed to create order:', error);
+    return null;
+  }
 }
 
 /**
- * Fetch all orders
+ * Fetch all orders with runtime validation - always returns array
  */
 export async function fetchOrders(): Promise<Order[]> {
-  return apiRequest<Order[]>('/api/orders');
+  try {
+    const response = await apiRequest<any>('/api/orders');
+    
+    // Direct array
+    if (Array.isArray(response)) {
+      return response;
+    }
+    
+    // Wrapped in 'orders' key
+    if (response && Array.isArray(response.orders)) {
+      return response.orders;
+    }
+    
+    // Wrapped in 'data' key
+    if (response && Array.isArray(response.data)) {
+      return response.data;
+    }
+    
+    // Fallback to empty array
+    return [];
+  } catch (error) {
+    console.error('Failed to fetch orders:', error);
+    return [];
+  }
 }
 
 /**
- * Fetch system metrics
- * Note: Backend returns Prometheus plain text format, not JSON.
- * This function gracefully handles the text response without parsing errors.
+ * Fetch system metrics with full validation
  */
 export async function fetchMetrics(): Promise<SystemMetrics> {
   try {
-    const metricsText = await apiRequest<string>('/api/metrics');
-    // Successfully fetched Prometheus metrics (plain text)
-    // Since the UI doesn't actually need to parse Prometheus metrics,
-    // we return a default object to avoid breaking the UI
-    console.log('Metrics endpoint returned successfully (Prometheus format)');
+    const response = await apiRequest<any>('/api/metrics');
     
-    // Return sensible defaults - UI will continue working with these
+    // If response is string (Prometheus format), return defaults
+    if (typeof response === 'string') {
+      console.log('Metrics endpoint returned Prometheus format');
+      return {
+        workersActive: 0,
+        maxWorkers: 0,
+        queueDepth: 0,
+        throughput: 0,
+        healthStatus: 'healthy'
+      };
+    }
+    
+    // If response is object, validate and fill missing fields
+    if (response && typeof response === 'object') {
+      return {
+        workersActive: typeof response.workersActive === 'number' ? response.workersActive : 0,
+        maxWorkers: typeof response.maxWorkers === 'number' ? response.maxWorkers : 0,
+        queueDepth: typeof response.queueDepth === 'number' ? response.queueDepth : 0,
+        throughput: typeof response.throughput === 'number' ? response.throughput : 0,
+        healthStatus: ['healthy', 'degraded', 'down'].includes(response.healthStatus) 
+          ? response.healthStatus 
+          : 'healthy'
+      };
+    }
+    
+    // Fallback defaults
     return {
       workersActive: 0,
       maxWorkers: 0,
@@ -105,7 +164,6 @@ export async function fetchMetrics(): Promise<SystemMetrics> {
     };
   } catch (error) {
     console.error('Failed to fetch metrics:', error);
-    // Return defaults on error to prevent UI crashes
     return {
       workersActive: 0,
       maxWorkers: 0,
@@ -117,12 +175,22 @@ export async function fetchMetrics(): Promise<SystemMetrics> {
 }
 
 /**
- * Reset system state
+ * Reset system state with validation
  */
 export async function resetState(): Promise<{ success: boolean; message: string }> {
-  return apiRequest('/api/reset', {
-    method: 'POST',
-  });
+  try {
+    const response = await apiRequest<any>('/api/reset', {
+      method: 'POST',
+    });
+    
+    return {
+      success: response?.success === true || response?.status === 'ok',
+      message: response?.message || response?.status || 'Reset completed'
+    };
+  } catch (error) {
+    console.error('Failed to reset state:', error);
+    return { success: false, message: 'Reset failed' };
+  }
 }
 
 /**
@@ -131,3 +199,4 @@ export async function resetState(): Promise<{ success: boolean; message: string 
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
+

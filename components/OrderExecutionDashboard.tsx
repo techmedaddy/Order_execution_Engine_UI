@@ -74,21 +74,35 @@ const OrderExecutionDashboard: React.FC = () => {
   // Simulation effect for "EXECUTING" orders
   useEffect(() => {
     const interval = setInterval(() => {
-      setOrders(prev => prev.map(order => {
-        if (order.status === 'QUEUED' && Math.random() > 0.7) {
-          return { ...order, status: 'EXECUTING' };
+      setOrders(prev => {
+        // Guard: ensure prev is array
+        if (!Array.isArray(prev)) {
+          return [];
         }
-        if (order.status === 'EXECUTING' && Math.random() > 0.8) {
-          return { ...order, status: Math.random() > 0.1 ? 'SUCCESS' : 'FAILED' };
-        }
-        return order;
-      }));
+        
+        return prev.map(order => {
+          if (order.status === 'QUEUED' && Math.random() > 0.7) {
+            return { ...order, status: 'EXECUTING' };
+          }
+          if (order.status === 'EXECUTING' && Math.random() > 0.8) {
+            return { ...order, status: Math.random() > 0.1 ? 'SUCCESS' : 'FAILED' };
+          }
+          return order;
+        });
+      });
       
-      setMetrics(prev => ({
-        ...prev,
-        workersActive: Math.min(prev.maxWorkers, Math.max(4, prev.workersActive + (Math.random() > 0.5 ? 1 : -1))),
-        queueDepth: Math.max(0, prev.queueDepth + (Math.random() > 0.5 ? 2 : -2))
-      }));
+      setMetrics(prev => {
+        // Guard: ensure prev has required fields
+        const safeMaxWorkers = typeof prev.maxWorkers === 'number' ? prev.maxWorkers : 32;
+        const safeWorkersActive = typeof prev.workersActive === 'number' ? prev.workersActive : 0;
+        const safeQueueDepth = typeof prev.queueDepth === 'number' ? prev.queueDepth : 0;
+        
+        return {
+          ...prev,
+          workersActive: Math.min(safeMaxWorkers, Math.max(4, safeWorkersActive + (Math.random() > 0.5 ? 1 : -1))),
+          queueDepth: Math.max(0, safeQueueDepth + (Math.random() > 0.5 ? 2 : -2))
+        };
+      });
     }, 3000);
 
     return () => clearInterval(interval);
@@ -98,6 +112,13 @@ const OrderExecutionDashboard: React.FC = () => {
     e.preventDefault();
     if (!form.amount) return;
     
+    // Validate amount is not NaN
+    const parsedAmount = parseFloat(form.amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      alert('Please enter a valid positive number for amount.');
+      return;
+    }
+    
     setIsSubmitting(true);
     
     try {
@@ -105,11 +126,20 @@ const OrderExecutionDashboard: React.FC = () => {
       const newOrder = await createOrder({
         baseToken: form.baseToken,
         quoteToken: form.quoteToken,
-        amount: parseFloat(form.amount),
+        amount: parsedAmount,
       });
       
-      setOrders([newOrder, ...orders]);
-      setForm(f => ({ ...f, amount: '' }));
+      // Guard: only update if newOrder is valid
+      if (newOrder && typeof newOrder === 'object' && newOrder.id) {
+        setOrders(prev => {
+          // Guard: ensure prev is array
+          const safePrev = Array.isArray(prev) ? prev : [];
+          return [newOrder, ...safePrev];
+        });
+        setForm(f => ({ ...f, amount: '' }));
+      } else {
+        alert('Failed to create order. Invalid response from server.');
+      }
       
       // Optionally refresh metrics after order creation
       const updatedMetrics = await fetchMetrics();
@@ -130,8 +160,18 @@ const OrderExecutionDashboard: React.FC = () => {
         fetchOrders(),
         fetchMetrics()
       ]);
-      setOrders(freshOrders);
-      setMetrics(freshMetrics);
+      
+      // Guard: validate freshOrders is array before setting
+      if (Array.isArray(freshOrders)) {
+        setOrders(freshOrders);
+      } else {
+        setOrders([]);
+      }
+      
+      // Guard: validate freshMetrics has required structure
+      if (freshMetrics && typeof freshMetrics === 'object') {
+        setMetrics(freshMetrics);
+      }
     } catch (error) {
       console.error('Failed to reset state:', error);
       alert('Failed to reset state. Please check console for details.');
@@ -325,7 +365,7 @@ const OrderExecutionDashboard: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            {orders.length === 0 ? (
+            {!Array.isArray(orders) || orders.length === 0 ? (
               <div className="bg-zinc-900/50 border border-dashed border-zinc-800 rounded-xl p-12 text-center">
                 <Layers className="w-8 h-8 text-zinc-700 mx-auto mb-3" />
                 <p className="text-sm text-zinc-500 font-medium">No execution history found</p>

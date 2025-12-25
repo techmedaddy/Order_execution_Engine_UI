@@ -129,24 +129,21 @@ const OrderExecutionDashboard: React.FC = () => {
         amount: parsedAmount,
       });
       
-      // Guard: only update if newOrder is valid
-      if (newOrder && typeof newOrder === 'object' && newOrder.id) {
-        setOrders(prev => {
-          // Guard: ensure prev is array
-          const safePrev = Array.isArray(prev) ? prev : [];
-          return [newOrder, ...safePrev];
-        });
-        setForm(f => ({ ...f, amount: '' }));
-      } else {
-        alert('Failed to create order. Invalid response from server.');
-      }
+      // Update state with validated order
+      setOrders(prev => {
+        // Guard: ensure prev is array
+        const safePrev = Array.isArray(prev) ? prev : [];
+        return [newOrder, ...safePrev];
+      });
+      setForm(f => ({ ...f, amount: '' }));
       
       // Optionally refresh metrics after order creation
       const updatedMetrics = await fetchMetrics();
       setMetrics(updatedMetrics);
     } catch (error) {
       console.error('Failed to create order:', error);
-      alert('Failed to create order. Please check console for details.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to create order: ${errorMessage}`);
     } finally {
       setIsSubmitting(false);
     }

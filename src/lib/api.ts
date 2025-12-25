@@ -44,7 +44,22 @@ async function apiRequest<T>(
     });
 
     if (!response.ok) {
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      // Try to extract error message from backend
+      let errorMessage = `API request failed: ${response.status} ${response.statusText}`;
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          if (errorData && errorData.error) {
+            errorMessage = errorData.error;
+          } else if (errorData && errorData.message) {
+            errorMessage = errorData.message;
+          }
+        }
+      } catch {
+        // If error parsing fails, use default message
+      }
+      throw new Error(errorMessage);
     }
 
     // Content-type aware parsing
@@ -62,34 +77,73 @@ async function apiRequest<T>(
 }
 
 /**
- * Create a new order with runtime validation
+ * Create a new order with strict runtime validation
+ * Handles backend response shapes: Order | { order: Order } | { data: Order }
  */
 export async function createOrder(orderData: {
   baseToken: string;
   quoteToken: string;
   amount: number;
-}): Promise<Order | null> {
-  try {
-    const response = await apiRequest<any>('/api/orders', {
-      method: 'POST',
-      body: JSON.stringify(orderData),
-    });
-    
-    // Handle wrapped responses
-    const order = response?.order || response;
-    
-    // Validate order shape
-    if (order && typeof order === 'object' && 
-        typeof order.id === 'string' && 
-        typeof order.status === 'string') {
-      return order as Order;
+}): Promise<Order> {
+  // Generate unique idempotency key for this request
+  const idempotencyKey = crypto.randomUUID();
+  
+  const response = await apiRequest<any>('/api/orders', {
+    method: 'POST',
+    body: JSON.stringify(orderData),
+    headers: {
+      'Idempotency-Key': idempotencyKey,
+    },
+  });
+  
+  // Handle all valid backend response shapes
+  let order: any;
+  if (response && typeof response === 'object') {
+    if (response.order) {
+      order = response.order;
+    } else if (response.data) {
+      order = response.data;
+    } else {
+      order = response;
     }
-    
-    return null;
-  } catch (error) {
-    console.error('Failed to create order:', error);
-    return null;
+  } else {
+    throw new Error('Invalid response: expected object');
   }
+  
+  // Strict validation: verify ALL required Order fields exist
+  if (!order || typeof order !== 'object') {
+    throw new Error('Invalid response: order data is not an object');
+  }
+  
+  if (typeof order.id !== 'string' || !order.id) {
+    throw new Error('Invalid response: missing or invalid id');
+  }
+  
+  if (typeof order.baseToken !== 'string' || !order.baseToken) {
+    throw new Error('Invalid response: missing or invalid baseToken');
+  }
+  
+  if (typeof order.quoteToken !== 'string' || !order.quoteToken) {
+    throw new Error('Invalid response: missing or invalid quoteToken');
+  }
+  
+  if (typeof order.amount !== 'number') {
+    throw new Error('Invalid response: missing or invalid amount');
+  }
+  
+  if (typeof order.status !== 'string' || !order.status) {
+    throw new Error('Invalid response: missing or invalid status');
+  }
+  
+  if (typeof order.timestamp !== 'string' || !order.timestamp) {
+    throw new Error('Invalid response: missing or invalid timestamp');
+  }
+  
+  if (typeof order.idempotencyKey !== 'string' || !order.idempotencyKey) {
+    throw new Error('Invalid response: missing or invalid idempotencyKey');
+  }
+  
+  return order as Order;
 }
 
 /**
